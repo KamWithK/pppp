@@ -43,10 +43,13 @@
             zig
             zls
             gdb
+            clang-tools
 
             shader-slang
-            renderdoc
+            vulkan-tools
             vulkan-validation-layers
+            spirv-tools
+            renderdoc
 
             wineWowPackages.stable
           ];
