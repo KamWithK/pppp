@@ -19,9 +19,7 @@ var game_quit: ?*const fn (app_context: *AppContext, result: sdl3.AppResult) cal
 
 pub fn main() u8 {
     sdl3.main_funcs.setMainReady();
-    var args = [_:null]?[*:0]u8{
-        @constCast("Hello SDL3"),
-    };
+    var args = [_:null]?[*:0]u8{};
 
     loadGameLibrary() catch |err| {
         std.debug.print("Failed to load game.so: {}\n", .{err});
