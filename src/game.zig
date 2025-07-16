@@ -6,19 +6,51 @@ const allocator = arena.allocator();
 
 const AppContext = @import("state.zig").AppContext;
 
-const PositionTextureVertex = struct {
-    x: f32,
-    y: f32,
-    z: f32,
-    u: f32,
-    v: f32,
+const SpriteInstance = struct {
+    position: [3]f32,
+    rotation: f32,
+    size: [2]f32,
+    padding: [2]f32,
+    uv: [2]f32,
+    tex: [2]f32,
+    rgba: [4]f32,
 };
+const test_instances = [_]SpriteInstance{
+    .{
+        .position = .{ 0, 0, 0 },
+        .rotation = 0,
+        .size = .{ 32, 32 },
+        .padding = .{ 0, 0 },
+        .uv = .{ 0, 0 },
+        .tex = .{ 1, 0.5 },
+        .rgba = .{ 1, 1, 1, 1 },
+    },
+    .{
+        .position = .{ 32, 32, 0 },
+        .rotation = 0,
+        .size = .{ 32, 32 },
+        .padding = .{ 0, 0 },
+        .uv = .{ 0, 0.5 },
+        .tex = .{ 1, 0.5 },
+        .rgba = .{ 1, 1, 1, 1 },
+    },
+};
+
+const sprite_instance_size = @sizeOf(SpriteInstance);
+const sprite_data_size = @sizeOf(@TypeOf(test_instances));
 
 const SCREEN_WIDTH = 1920;
 const SCREEN_HEIGHT = 1080;
 const DEBUG_MODE = true;
 const SHADER_FORMATS = sdl3.gpu.ShaderFormatFlags{ .spirv = true };
 const WINDOW_FLAGS = sdl3.video.Window.Flags{ .resizable = true, .borderless = true };
+
+const PROJECTION_MATRIX = [4][4]f32{
+    .{ 2.0 / @as(f32, SCREEN_WIDTH), 0, 0, 0 },
+    .{ 0, -2.0 / @as(f32, SCREEN_HEIGHT), 0, 0 },
+    .{ 0, 0, 1, 0 },
+    .{ -1, 1, 0, 1 },
+};
 
 const image_shader_bin = @embedFile("shaders/image.spv");
 const image_asset = @embedFile("sprites/conveyor.png");
@@ -36,19 +68,19 @@ pub fn init(
 
     try device.claimWindow(window);
 
-    const vert_shader = try device.createShader(.{
+    const vert_shader = device.createShader(.{
         .code = image_shader_bin,
         .format = SHADER_FORMATS,
         .stage = .vertex,
         .entry_point = "vertexmain",
         .num_samplers = 0,
-        .num_uniform_buffers = 0,
-        .num_storage_buffers = 0,
+        .num_uniform_buffers = 1,
+        .num_storage_buffers = 1,
         .num_storage_textures = 0,
-    });
+    }) catch return .failure;
     defer device.releaseShader(vert_shader);
 
-    const frag_shader = try device.createShader(.{
+    const frag_shader = device.createShader(.{
         .code = image_shader_bin,
         .format = SHADER_FORMATS,
         .stage = .fragment,
@@ -57,7 +89,7 @@ pub fn init(
         .num_uniform_buffers = 0,
         .num_storage_buffers = 0,
         .num_storage_textures = 0,
-    });
+    }) catch return .failure;
     defer device.releaseShader(frag_shader);
 
     const image_stream = sdl3.io_stream.Stream.initFromConstMem(image_asset) catch return .failure;
@@ -72,33 +104,11 @@ pub fn init(
                 },
             },
         },
-        .vertex_input_state = .{
-            .vertex_buffer_descriptions = &.{.{
-                .slot = 0,
-                .input_rate = .vertex,
-                .instance_step_rate = 0,
-                .pitch = @sizeOf(PositionTextureVertex),
-            }},
-            .vertex_attributes = &.{
-                .{
-                    .buffer_slot = 0,
-                    .format = .f32x3,
-                    .location = 0,
-                    .offset = 0,
-                },
-                .{
-                    .buffer_slot = 0,
-                    .format = .f32x2,
-                    .location = 1,
-                    .offset = @sizeOf(f32) * 3,
-                },
-            },
-        },
         .vertex_shader = vert_shader,
         .fragment_shader = frag_shader,
     };
 
-    pipeline = try device.createGraphicsPipeline(pipeline_create_info);
+    pipeline = device.createGraphicsPipeline(pipeline_create_info) catch return .failure;
     errdefer device.releaseGraphicsPipeline(pipeline.?);
 
     if (pipeline == null) return .failure;
@@ -112,105 +122,68 @@ pub fn init(
         .address_mode_w = .clamp_to_edge,
     }) catch return .failure;
 
-    const vertex_data = [_]PositionTextureVertex{
-        .{ .x = -1, .y = 1, .z = 0, .u = 0, .v = 0 },
-        .{ .x = 1, .y = 1, .z = 0, .u = 1, .v = 0 },
-        .{ .x = 1, .y = -1, .z = 0, .u = 1, .v = 1 },
-        .{ .x = -1, .y = -1, .z = 0, .u = 0, .v = 1 },
-    };
-    const index_data = [_]u16{ 0, 1, 2, 0, 2, 3 };
-
-    const vertex_data_size: u32 = @intCast(@sizeOf(@TypeOf(vertex_data)));
-    const index_data_size: u32 = @intCast(@sizeOf(@TypeOf(index_data)));
-
-    const vertex_buffer = device.createBuffer(.{
-        .usage = .{ .vertex = true },
-        .size = vertex_data_size,
-        .props = .{
-            .name = "image vertex buffer",
-        },
-    }) catch return .failure;
-    errdefer device.releaseBuffer(vertex_buffer);
-    const index_buffer = device.createBuffer(.{
-        .usage = .{ .index = true },
-        .size = index_data_size,
-        .props = .{
-            .name = "image index buffer",
-        },
-    }) catch return .failure;
-    errdefer device.releaseBuffer(index_buffer);
-
-    const image_texture = device.createTexture(.{
+    const atlas_texture = device.createTexture(.{
         .format = .r8g8b8a8_unorm,
         .width = @intCast(image_surface.getWidth()),
         .height = @intCast(image_surface.getHeight()),
         .layer_count_or_depth = 1,
         .num_levels = 1,
         .usage = .{ .sampler = true },
-        .props = .{ .name = "lettuce texture" },
+        .props = .{ .name = "sprite atlas" },
     }) catch return .failure;
-    errdefer device.releaseTexture(image_texture);
+    errdefer device.releaseTexture(atlas_texture);
 
-    const transfer_buffer = try device.createTransferBuffer(.{
-        .usage = .upload,
-        .size = vertex_data_size + index_data_size,
-    });
-    defer device.releaseTransferBuffer(transfer_buffer);
-    const transfer_buffer_mapped = @as(
-        *@TypeOf(vertex_data),
-        @alignCast(@ptrCast(try device.mapTransferBuffer(transfer_buffer, false))),
-    );
-    transfer_buffer_mapped.* = vertex_data;
-    @as(*@TypeOf(index_data), @ptrFromInt(@intFromPtr(transfer_buffer_mapped) + vertex_data_size)).* = index_data;
-    device.unmapTransferBuffer(transfer_buffer);
-
-    const texture_buffer = try device.createTransferBuffer(.{
+    const atlas_transfer_buffer = device.createTransferBuffer(.{
         .usage = .upload,
         .size = @intCast(image_surface.getWidth() * image_surface.getHeight() * 4),
-    });
-    defer device.releaseTransferBuffer(texture_buffer);
-    const texture_transfer_buffer_mapped = try device.mapTransferBuffer(texture_buffer, false);
-    @memcpy(texture_transfer_buffer_mapped, image_surface.getPixels().?);
-    device.unmapTransferBuffer(texture_buffer);
+    }) catch return .failure;
+    defer device.releaseTransferBuffer(atlas_transfer_buffer);
+    @memcpy(try device.mapTransferBuffer(atlas_transfer_buffer, false), image_surface.getPixels().?);
+    device.unmapTransferBuffer(atlas_transfer_buffer);
 
-    const upload_cmd_buf = device.acquireCommandBuffer() catch return .failure;
-    const copy_pass = upload_cmd_buf.beginCopyPass();
-    copy_pass.uploadToBuffer(.{
-        .transfer_buffer = transfer_buffer,
-        .offset = 0,
-    }, .{
-        .buffer = vertex_buffer,
-        .offset = 0,
-        .size = vertex_data_size,
-    }, false);
-    copy_pass.uploadToBuffer(.{
-        .transfer_buffer = transfer_buffer,
-        .offset = vertex_data_size,
-    }, .{
-        .buffer = index_buffer,
-        .offset = 0,
-        .size = index_data_size,
-    }, false);
+    const instance_buffer = device.createBuffer(.{
+        .usage = .{ .graphics_storage_read = true },
+        .size = sprite_data_size,
+    }) catch return .failure;
+    const instance_transfer_buffer = device.createTransferBuffer(.{
+        .usage = .upload,
+        .size = sprite_data_size,
+    }) catch return .failure;
+
+    const command_buffer = device.acquireCommandBuffer() catch return .failure;
+    const copy_pass = command_buffer.beginCopyPass();
     copy_pass.uploadToTexture(.{
-        .transfer_buffer = texture_buffer,
+        .transfer_buffer = atlas_transfer_buffer,
         .offset = 0,
     }, .{
-        .texture = image_texture,
+        .texture = atlas_texture,
         .width = @intCast(image_surface.getWidth()),
         .height = @intCast(image_surface.getHeight()),
         .depth = 1,
     }, false);
+    copy_pass.uploadToBuffer(
+        .{
+            .transfer_buffer = instance_transfer_buffer,
+            .offset = 0,
+        },
+        .{
+            .buffer = instance_buffer,
+            .offset = 0,
+            .size = sprite_data_size,
+        },
+        true,
+    );
     copy_pass.end();
-    upload_cmd_buf.submit() catch return .failure;
+    command_buffer.submit() catch return .failure;
 
     const context = allocator.create(AppContext) catch return .failure;
     context.* = .{
         .device = device,
         .window = window,
         .pipeline = pipeline.?,
-        .vertex_buffer = vertex_buffer,
-        .index_buffer = index_buffer,
-        .image_texture = image_texture,
+        .instance_buffer = instance_buffer,
+        .instance_transfer_buffer = instance_transfer_buffer,
+        .atlas_texture = atlas_texture,
         .sampler = sampler,
     };
     app_context.* = context;
@@ -219,37 +192,62 @@ pub fn init(
 }
 
 pub fn iterate(app_context: *AppContext) !sdl3.AppResult {
-    const command_buffer = try app_context.device.acquireCommandBuffer();
-    const swapchain_texture = try command_buffer.waitAndAcquireSwapchainTexture(app_context.window);
+    const instance_transfer_buffer_mapped = @as(
+        *@TypeOf(test_instances),
+        @alignCast(@ptrCast(
+            try app_context.device.mapTransferBuffer(app_context.instance_transfer_buffer, true),
+        )),
+    );
+    instance_transfer_buffer_mapped.* = test_instances;
+    app_context.device.unmapTransferBuffer(app_context.instance_transfer_buffer);
+
+    const command_buffer = app_context.device.acquireCommandBuffer() catch return .failure;
+
+    const copy_pass = command_buffer.beginCopyPass();
+    copy_pass.uploadToBuffer(
+        .{
+            .transfer_buffer = app_context.instance_transfer_buffer,
+            .offset = 0,
+        },
+        .{
+            .buffer = app_context.instance_buffer,
+            .offset = 0,
+            .size = sprite_data_size,
+        },
+        true,
+    );
+    copy_pass.end();
+
+    const swapchain_texture = command_buffer.waitAndAcquireSwapchainTexture(app_context.window) catch return .failure;
 
     if (swapchain_texture.texture) |texture| {
-        const render_pass = command_buffer.beginRenderPass(&.{sdl3.gpu.ColorTargetInfo{
-            .texture = texture,
-            .clear_color = .{ .r = 0.5, .g = 0, .b = 0.5, .a = 1 },
-            .load = .clear,
-            .store = .store,
-        }}, null);
+        const render_pass = command_buffer.beginRenderPass(
+            &.{sdl3.gpu.ColorTargetInfo{
+                .texture = texture,
+                .clear_color = .{ .r = 0.5, .g = 0, .b = 0.5, .a = 1 },
+                .load = .clear,
+                .store = .store,
+            }},
+            null,
+        );
         defer render_pass.end();
 
         render_pass.bindGraphicsPipeline(app_context.pipeline);
 
-        render_pass.bindVertexBuffers(0, &.{.{
-            .buffer = app_context.vertex_buffer,
-            .offset = 0,
-        }});
-        render_pass.bindIndexBuffer(.{
-            .buffer = app_context.index_buffer,
-            .offset = 0,
-        }, .indices_16bit);
+        render_pass.bindVertexStorageBuffers(
+            0,
+            &.{app_context.instance_buffer},
+        );
         render_pass.bindFragmentSamplers(
             0,
             &.{.{
-                .texture = app_context.image_texture,
+                .texture = app_context.atlas_texture,
                 .sampler = app_context.sampler,
             }},
         );
+        command_buffer.pushVertexUniformData(0, std.mem.sliceAsBytes(&PROJECTION_MATRIX));
 
-        render_pass.drawIndexedPrimitives(6, 1, 0, 0, 0);
+        render_pass.drawPrimitives(6 * test_instances.len, 1, 0, 0);
     }
 
     try command_buffer.submit();
@@ -276,6 +274,7 @@ pub fn quit(
 ) !void {
     _ = result;
     app_context.device.releaseWindow(app_context.window);
+    app_context.device.releaseTransferBuffer(app_context.instance_transfer_buffer);
     app_context.window.deinit();
     app_context.device.deinit();
     arena.deinit();
