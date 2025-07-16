@@ -1,31 +1,5 @@
 const std = @import("std");
-
-fn addAssets(b: *std.Build, module: *std.Build.Module, sub_path: []const u8) !void {
-    var dir = try std.fs.cwd().openDir(
-        sub_path,
-        .{ .iterate = true },
-    );
-    defer {
-        dir.close();
-    }
-
-    var walker = try dir.walk(b.allocator);
-    defer walker.deinit();
-
-    while (try walker.next()) |entry| {
-        if (entry.kind == .directory) continue;
-
-        const full_path = try std.fs.path.join(b.allocator, &[_][]const u8{
-            sub_path,
-            entry.path,
-        });
-        defer b.allocator.free(full_path);
-
-        module.addAnonymousImport(entry.path, .{
-            .root_source_file = b.path(full_path),
-        });
-    }
-}
+const assetpack = @import("assetpack");
 
 // Although this function looks imperative, note that its job is to
 // declaratively construct a build graph that will be executed by an external
@@ -41,6 +15,8 @@ pub fn build(b: *std.Build) void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
+
+    const assets_module = assetpack.pack(b, b.path("assets"), .{});
 
     // This creates a "module", which represents a collection of source files alongside
     // some compilation options, such as optimization mode and linked system libraries.
@@ -89,7 +65,7 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
     lib.root_module.addImport("sdl3", sdl3.module("sdl3"));
-    addAssets(b, lib.root_module, "assets") catch unreachable;
+    lib.root_module.addImport("assets", assets_module);
 
     // This declares intent for the library to be installed into the standard
     // location when the user invokes the "install" step (the default step when

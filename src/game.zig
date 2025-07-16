@@ -2,6 +2,7 @@ const std = @import("std");
 const allocator = std.heap.smp_allocator;
 
 const sdl3 = @import("sdl3");
+const assets = @import("assets");
 
 const AppState = @import("state.zig").AppState;
 
@@ -51,12 +52,12 @@ const PROJECTION_MATRIX = [4][4]f32{
     .{ -1, 1, 0, 1 },
 };
 
-const image_shader_bin = @embedFile("shaders/image.spv");
-const image_asset = @embedFile("sprites/conveyor.png");
-
 pub fn init(
     app_state: *?*AppState,
 ) !sdl3.AppResult {
+    const image_shader_bin = assets.get.file("/shaders/image.spv");
+    const image_asset = assets.get.file("/sprites/conveyor.png");
+
     const window = sdl3.video.Window.init("Pixel Perfect Painted Pipeline", SCREEN_WIDTH, SCREEN_HEIGHT, WINDOW_FLAGS) catch return .failure;
     errdefer window.deinit();
 

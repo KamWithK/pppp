@@ -40,6 +40,10 @@
             .url = "git+https://github.com/Gota7/zig-sdl3?ref=master#e3601fff200690df85a34616c0fa3df61f692188",
             .hash = "sdl3-0.0.1-NmT1Q9RzIAA-LOY_pnTsPXSPW7rBJYg9l7GuQ7Wu4-Wo",
         },
+        .assetpack = .{
+            .url = "git+https://github.com/silversquirl/assetpack#17c6e5e1af3c7a9d9025232b30378405f8681e60",
+            .hash = "assetpack-0.1.0-5DA2dxhAAACUESRirVFQSYMT6XfF8zT9cfKQQfCUvBAe",
+        },
     },
     .paths = .{
         "build.zig",
