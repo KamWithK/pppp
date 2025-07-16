@@ -55,18 +55,16 @@ const PROJECTION_MATRIX = [4][4]f32{
 const image_shader_bin = @embedFile("shaders/image.spv");
 const image_asset = @embedFile("sprites/conveyor.png");
 
-var pipeline: ?sdl3.gpu.GraphicsPipeline = null;
-
 pub fn init(
     app_context: *?*AppContext,
 ) !sdl3.AppResult {
-    const window = try sdl3.video.Window.init("Pixel Perfect Painted Pipeline", SCREEN_WIDTH, SCREEN_HEIGHT, WINDOW_FLAGS);
+    const window = sdl3.video.Window.init("Pixel Perfect Painted Pipeline", SCREEN_WIDTH, SCREEN_HEIGHT, WINDOW_FLAGS) catch return .failure;
     errdefer window.deinit();
 
-    const device = try sdl3.gpu.Device.init(SHADER_FORMATS, DEBUG_MODE, null);
+    const device = sdl3.gpu.Device.init(SHADER_FORMATS, DEBUG_MODE, null) catch return .failure;
     errdefer device.deinit();
 
-    try device.claimWindow(window);
+    device.claimWindow(window) catch return .failure;
 
     const vert_shader = device.createShader(.{
         .code = image_shader_bin,
@@ -94,7 +92,7 @@ pub fn init(
 
     const image_stream = sdl3.io_stream.Stream.initFromConstMem(image_asset) catch return .failure;
     const image_surface = sdl3.image.loadIo(image_stream, true) catch return .failure;
-    errdefer image_surface.deinit();
+    defer image_surface.deinit();
 
     const pipeline_create_info = sdl3.gpu.GraphicsPipelineCreateInfo{
         .target_info = .{
@@ -108,10 +106,8 @@ pub fn init(
         .fragment_shader = frag_shader,
     };
 
-    pipeline = device.createGraphicsPipeline(pipeline_create_info) catch return .failure;
-    errdefer device.releaseGraphicsPipeline(pipeline.?);
-
-    if (pipeline == null) return .failure;
+    const pipeline = device.createGraphicsPipeline(pipeline_create_info) catch return .failure;
+    errdefer device.releaseGraphicsPipeline(pipeline);
 
     const sampler = device.createSampler(.{
         .min_filter = .nearest,
@@ -138,7 +134,11 @@ pub fn init(
         .size = @intCast(image_surface.getWidth() * image_surface.getHeight() * 4),
     }) catch return .failure;
     defer device.releaseTransferBuffer(atlas_transfer_buffer);
-    @memcpy(try device.mapTransferBuffer(atlas_transfer_buffer, false), image_surface.getPixels().?);
+    const atlas_pixels = image_surface.getPixels() orelse return .failure;
+    @memcpy(
+        device.mapTransferBuffer(atlas_transfer_buffer, false) catch return .failure,
+        atlas_pixels,
+    );
     device.unmapTransferBuffer(atlas_transfer_buffer);
 
     const instance_buffer = device.createBuffer(.{
@@ -180,7 +180,7 @@ pub fn init(
     context.* = .{
         .device = device,
         .window = window,
-        .pipeline = pipeline.?,
+        .pipeline = pipeline,
         .instance_buffer = instance_buffer,
         .instance_transfer_buffer = instance_transfer_buffer,
         .atlas_texture = atlas_texture,
@@ -195,7 +195,10 @@ pub fn iterate(app_context: *AppContext) !sdl3.AppResult {
     const instance_transfer_buffer_mapped = @as(
         *@TypeOf(test_instances),
         @alignCast(@ptrCast(
-            try app_context.device.mapTransferBuffer(app_context.instance_transfer_buffer, true),
+            app_context.device.mapTransferBuffer(
+                app_context.instance_transfer_buffer,
+                true,
+            ) catch return .failure,
         )),
     );
     instance_transfer_buffer_mapped.* = test_instances;
@@ -250,7 +253,7 @@ pub fn iterate(app_context: *AppContext) !sdl3.AppResult {
         render_pass.drawPrimitives(6 * test_instances.len, 1, 0, 0);
     }
 
-    try command_buffer.submit();
+    command_buffer.submit() catch return .failure;
 
     return .run;
 }
@@ -274,7 +277,11 @@ pub fn quit(
 ) !void {
     _ = result;
     app_context.device.releaseWindow(app_context.window);
+    app_context.device.releaseBuffer(app_context.instance_buffer);
     app_context.device.releaseTransferBuffer(app_context.instance_transfer_buffer);
+    app_context.device.releaseGraphicsPipeline(app_context.pipeline);
+    app_context.device.releaseSampler(app_context.sampler);
+    app_context.device.releaseTexture(app_context.atlas_texture);
     app_context.window.deinit();
     app_context.device.deinit();
     arena.deinit();
