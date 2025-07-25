@@ -8,4 +8,5 @@ pub const AppState = struct {
     instance_buffer: sdl3.gpu.Buffer,
     instance_transfer_buffer: sdl3.gpu.TransferBuffer,
     sampler: sdl3.gpu.Sampler,
+    gamepad: ?sdl3.gamepad.Gamepad = null,
 };
