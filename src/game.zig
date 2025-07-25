@@ -2,6 +2,7 @@ const std = @import("std");
 const allocator = std.heap.smp_allocator;
 
 const sdl3 = @import("sdl3");
+const zm = @import("zmath");
 const assets = @import("assets");
 
 const AppState = @import("state.zig").AppState;
@@ -41,16 +42,33 @@ const sprite_data_size = @sizeOf(@TypeOf(test_instances));
 
 const SCREEN_WIDTH = 1920;
 const SCREEN_HEIGHT = 1080;
+const MOVEMENT_SPEED = 0.5;
+const KEYBOARD_MOVEMENT_UNIT = 1;
 const DEBUG_MODE = true;
 const SHADER_FORMATS = sdl3.gpu.ShaderFormatFlags{ .spirv = true };
 const WINDOW_FLAGS = sdl3.video.WindowFlags{ .resizable = true, .borderless = true };
 
-const PROJECTION_MATRIX = [4][4]f32{
-    .{ 2.0 / @as(f32, SCREEN_WIDTH), 0, 0, 0 },
-    .{ 0, -2.0 / @as(f32, SCREEN_HEIGHT), 0, 0 },
-    .{ 0, 0, 1, 0 },
-    .{ -1, 1, 0, 1 },
-};
+const PROJECTION_MATRIX = zm.orthographicOffCenterLh(
+    0,
+    SCREEN_WIDTH,
+    0,
+    SCREEN_HEIGHT,
+    0,
+    1,
+);
+
+fn normalize_axis(raw: i16, deadzone: f32) f32 {
+    const max: f32 = std.math.maxInt(i16);
+    const min: f32 = std.math.minInt(i16);
+    const value: f32 = @floatFromInt(raw);
+
+    const norm = if (value >= 0.0)
+        value / max
+    else
+        value / -min;
+
+    return if (@abs(norm) > deadzone) norm else 0.0;
+}
 
 pub fn init(
     app_state: *?*AppState,
@@ -189,6 +207,7 @@ pub fn init(
         .instance_transfer_buffer = instance_transfer_buffer,
         .atlas_texture = atlas_texture,
         .sampler = sampler,
+        .previous_time = sdl3.timer.getMillisecondsSinceInit(),
     };
     app_state.* = state;
 
@@ -196,6 +215,23 @@ pub fn init(
 }
 
 pub fn iterate(app_state: *AppState) !sdl3.AppResult {
+    const current_time = sdl3.timer.getMillisecondsSinceInit();
+    const delta_time: f32 = @floatFromInt(current_time - app_state.previous_time);
+    app_state.previous_time = current_time;
+
+    const delta_scale = MOVEMENT_SPEED * delta_time;
+    const raw_vector = zm.Vec{
+        app_state.input.movement_x,
+        app_state.input.movement_y,
+        0,
+        0,
+    };
+    const direction_vector = if (app_state.input.movement_x != 0 or app_state.input.movement_y != 0) zm.normalize2(raw_vector) else raw_vector;
+    const movement_vector = direction_vector * zm.f32x4s(delta_scale);
+    app_state.camera += movement_vector;
+    const movement_matrix = zm.translationV(app_state.camera);
+    const view_projection_matrix = zm.mul(movement_matrix, PROJECTION_MATRIX);
+
     const instance_transfer_buffer_mapped = @as(
         *@TypeOf(test_instances),
         @alignCast(@ptrCast(
@@ -252,7 +288,8 @@ pub fn iterate(app_state: *AppState) !sdl3.AppResult {
                 .sampler = app_state.sampler,
             }},
         );
-        command_buffer.pushVertexUniformData(0, std.mem.sliceAsBytes(&PROJECTION_MATRIX));
+
+        command_buffer.pushVertexUniformData(0, std.mem.sliceAsBytes(&view_projection_matrix));
 
         render_pass.drawPrimitives(6 * test_instances.len, 1, 0, 0);
     }
@@ -269,7 +306,34 @@ pub fn event(
     switch (curr_event.*) {
         .quit => return .success,
         .terminating => return .success,
-        .key_down => {},
+        .key_down => {
+            const key = curr_event.key_down.key orelse return .run;
+            switch (key) {
+                .up => app_state.input.movement_y = -KEYBOARD_MOVEMENT_UNIT,
+                .left => app_state.input.movement_x = -KEYBOARD_MOVEMENT_UNIT,
+                .down => app_state.input.movement_y = KEYBOARD_MOVEMENT_UNIT,
+                .right => app_state.input.movement_x = KEYBOARD_MOVEMENT_UNIT,
+                .w => app_state.input.movement_y = -KEYBOARD_MOVEMENT_UNIT,
+                .a => app_state.input.movement_x = -KEYBOARD_MOVEMENT_UNIT,
+                .s => app_state.input.movement_y = KEYBOARD_MOVEMENT_UNIT,
+                .d => app_state.input.movement_x = KEYBOARD_MOVEMENT_UNIT,
+                else => {},
+            }
+        },
+        .key_up => {
+            const key = curr_event.key_up.key orelse return .run;
+            switch (key) {
+                .up => app_state.input.movement_y = 0,
+                .left => app_state.input.movement_x = 0,
+                .down => app_state.input.movement_y = 0,
+                .right => app_state.input.movement_x = 0,
+                .w => app_state.input.movement_y = 0,
+                .a => app_state.input.movement_x = 0,
+                .s => app_state.input.movement_y = 0,
+                .d => app_state.input.movement_x = 0,
+                else => {},
+            }
+        },
         .gamepad_added => {
             app_state.gamepad = try sdl3.gamepad.Gamepad.init(curr_event.gamepad_added.id);
         },
@@ -277,7 +341,15 @@ pub fn event(
             if (app_state.gamepad) |gamepad| gamepad.deinit();
             app_state.gamepad = null;
         },
-        .gamepad_axis_motion => {},
+        .gamepad_axis_motion => {
+            const axis_motion = curr_event.gamepad_axis_motion;
+
+            switch (axis_motion.axis) {
+                .left_x => app_state.input.movement_x = normalize_axis(axis_motion.value, 0.1),
+                .left_y => app_state.input.movement_y = normalize_axis(axis_motion.value, 0.1),
+                else => {},
+            }
+        },
         else => {},
     }
 

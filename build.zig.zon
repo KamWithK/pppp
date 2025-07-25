@@ -44,6 +44,10 @@
             .url = "git+https://github.com/silversquirl/assetpack#17c6e5e1af3c7a9d9025232b30378405f8681e60",
             .hash = "assetpack-0.1.0-5DA2dxhAAACUESRirVFQSYMT6XfF8zT9cfKQQfCUvBAe",
         },
+        .zmath = .{
+            .url = "git+https://github.com/zig-gamedev/zmath.git#05799b336d4eb315cd5a5e5693a5704ba01db36c",
+            .hash = "zmath-0.11.0-dev-wjwivdErAwA9JvOksjectxgnDUZumDR1V9DwKy5UeTOT",
+        },
     },
     .paths = .{
         "build.zig",
