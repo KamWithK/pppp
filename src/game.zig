@@ -59,6 +59,10 @@ pub fn init(
     const image_shader_bin = assets.get.file("/shaders/image.spv");
     const image_asset = assets.get.file("/sprites/conveyor.png");
 
+    try sdl3.init(.{
+        .gamepad = true,
+    });
+
     const window = sdl3.video.Window.init("Pixel Perfect Painted Pipeline", SCREEN_WIDTH, SCREEN_HEIGHT, WINDOW_FLAGS) catch return .failure;
     errdefer window.deinit();
 
@@ -263,13 +267,22 @@ pub fn event(
     app_context: *AppContext,
     curr_event: *const sdl3.events.Event,
 ) !sdl3.AppResult {
-    _ = app_context;
+    switch (curr_event.*) {
+        .quit => return .success,
+        .terminating => return .success,
+        .key_down => {},
+        .gamepad_added => {
+            app_context.gamepad = try sdl3.gamepad.Gamepad.init(curr_event.gamepad_added.id);
+        },
+        .gamepad_removed => {
+            if (app_context.gamepad) |gamepad| gamepad.deinit();
+            app_context.gamepad = null;
+        },
+        .gamepad_axis_motion => {},
+        else => {},
+    }
 
-    return switch (curr_event.*) {
-        .quit => .success,
-        .terminating => .success,
-        else => .run,
-    };
+    return .run;
 }
 
 pub fn quit(
@@ -285,5 +298,6 @@ pub fn quit(
     app_context.device.releaseTexture(app_context.atlas_texture);
     app_context.window.deinit();
     app_context.device.deinit();
+    if (app_context.gamepad) |gamepad| gamepad.deinit();
     arena.deinit();
 }
