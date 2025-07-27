@@ -1,5 +1,6 @@
 const std = @import("std");
 const assetpack = @import("assetpack");
+const atlas_pack = @import("src/atlas_pack.zig");
 
 // Although this function looks imperative, note that its job is to
 // declaratively construct a build graph that will be executed by an external
@@ -17,6 +18,12 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const assets_module = assetpack.pack(b, b.path("assets"), .{});
+
+    const atlas_mod = b.createModule(.{
+        .root_source_file = b.path("src/atlas_pack.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
 
     // This creates a "module", which represents a collection of source files alongside
     // some compilation options, such as optimization mode and linked system libraries.
@@ -45,7 +52,7 @@ pub fn build(b: *std.Build) void {
     // Graphics and input library.
     const sdl3 = b.dependency("sdl3", .{
         .target = target,
-        .optimize = optimize,
+        .optimize = .ReleaseFast,
         .callbacks = true,
         .ext_image = true,
         .c_sdl_preferred_linkage = .dynamic,
@@ -56,6 +63,25 @@ pub fn build(b: *std.Build) void {
     // This is what allows Zig source code to use `@import("foo")` where 'foo' is not a
     // file path. In this case, we set up `exe_mod` to import `lib_mod`.
     exe_mod.addImport("pppp_lib", lib_mod);
+
+    // This creates another `std.Build.Step.Compile`, but this one builds an executable
+    // rather than a static library.
+    const atlas_exe = b.addExecutable(.{
+        .name = "pppp",
+        .root_module = atlas_mod,
+    });
+    atlas_exe.root_module.addImport("sdl3", sdl3.module("sdl3"));
+
+    // This *creates* a Run step in the build graph, to be executed when another
+    // step is evaluated that depends on it. The next line below will establish
+    // such a dependency.
+    const atlas_cmd = b.addRunArtifact(atlas_exe);
+
+    // By making the run step depend on the install step, it will be run from the
+    // installation directory rather than directly from within the cache directory.
+    // This is not necessary, however, if the application depends on other installed
+    // files, this ensures they will be present and in the expected location.
+    atlas_cmd.step.dependOn(b.getInstallStep());
 
     // Now, we will create a static library based on the module we created above.
     // This creates a `std.Build.Step.Compile`, which is the build step responsible
@@ -98,6 +124,9 @@ pub fn build(b: *std.Build) void {
     // This is not necessary, however, if the application depends on other installed
     // files, this ensures they will be present and in the expected location.
     run_cmd.step.dependOn(b.getInstallStep());
+
+    // Run after atlas generation.
+    run_cmd.step.dependOn(&atlas_cmd.step);
 
     // This allows the user to pass arguments to the application in the build
     // command itself, like this: `zig build run -- arg1 arg2 etc`
