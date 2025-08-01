@@ -51,6 +51,7 @@ pub fn build(b: *std.Build) void {
         .c_sdl_preferred_linkage = .dynamic,
     });
     const zmath = b.dependency("zmath", .{});
+    const zmesh = b.dependency("zmesh", .{});
 
     // Modules can depend on one another using the `std.Build.Module.addImport` function.
     // This is what allows Zig source code to use `@import("foo")` where 'foo' is not a
@@ -65,9 +66,11 @@ pub fn build(b: *std.Build) void {
         .root_module = lib_mod,
         .link_libc = true,
     });
+    lib.root_module.addImport("assets", assets_module);
     lib.root_module.addImport("sdl3", sdl3.module("sdl3"));
     lib.root_module.addImport("zmath", zmath.module("root"));
-    lib.root_module.addImport("assets", assets_module);
+    lib.root_module.addImport("zmesh", zmesh.module("root"));
+    lib.linkLibrary(zmesh.artifact("zmesh"));
 
     // This declares intent for the library to be installed into the standard
     // location when the user invokes the "install" step (the default step when
@@ -82,6 +85,8 @@ pub fn build(b: *std.Build) void {
     });
     exe.root_module.addImport("sdl3", sdl3.module("sdl3"));
     exe.root_module.addImport("zmath", zmath.module("root"));
+    exe.root_module.addImport("zmesh", zmesh.module("root"));
+    exe.linkLibrary(zmesh.artifact("zmesh"));
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default

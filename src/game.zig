@@ -1,6 +1,7 @@
 const std = @import("std");
 const sdl3 = @import("sdl3");
 const zm = @import("zmath");
+const zmesh = @import("zmesh");
 const assets = @import("assets");
 
 var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -8,55 +9,25 @@ const allocator = arena.allocator();
 
 const AppContext = @import("state.zig").AppContext;
 
-const SpriteInstance = struct {
-    position: [3]f32,
-    rotation: f32,
-    size: [2]f32,
-    padding: [2]f32,
-    uv: [2]f32,
-    tex: [2]f32,
-    rgba: [4]f32,
+const Vertex = struct {
+    positions: [3]f32,
+    texcoords: [2]f32,
 };
-const test_instances = [_]SpriteInstance{
-    .{
-        .position = .{ 0, 0, 0 },
-        .rotation = 0,
-        .size = .{ 32, 32 },
-        .padding = .{ 0, 0 },
-        .uv = .{ 0, 0 },
-        .tex = .{ 1, 0.5 },
-        .rgba = .{ 1, 1, 1, 1 },
-    },
-    .{
-        .position = .{ 32, 32, 0 },
-        .rotation = 0,
-        .size = .{ 32, 32 },
-        .padding = .{ 0, 0 },
-        .uv = .{ 0, 0.5 },
-        .tex = .{ 1, 0.5 },
-        .rgba = .{ 1, 1, 1, 1 },
-    },
+const CameraData = struct {
+    view: zm.Mat,
+    projection: zm.Mat,
 };
 
-const sprite_instance_size = @sizeOf(SpriteInstance);
-const sprite_data_size = @sizeOf(@TypeOf(test_instances));
+const MAX_INSTANCES = 1000;
+const INSTACE_BUFFER_SIZE = MAX_INSTANCES * @sizeOf(zm.Mat);
 
 const SCREEN_WIDTH = 1920;
 const SCREEN_HEIGHT = 1080;
-const MOVEMENT_SPEED = 0.5;
+const MOVEMENT_SPEED = 0.005;
 const KEYBOARD_MOVEMENT_UNIT = 1;
 const DEBUG_MODE = true;
 const SHADER_FORMATS = sdl3.gpu.ShaderFormatFlags{ .spirv = true };
 const WINDOW_FLAGS = sdl3.video.Window.Flags{ .resizable = true, .borderless = true };
-
-const PROJECTION_MATRIX = zm.orthographicOffCenterLh(
-    0,
-    SCREEN_WIDTH,
-    0,
-    SCREEN_HEIGHT,
-    0,
-    1,
-);
 
 fn normalize_axis(raw: i16, deadzone: f32) f32 {
     const max: f32 = std.math.maxInt(i16);
@@ -74,12 +45,13 @@ fn normalize_axis(raw: i16, deadzone: f32) f32 {
 pub fn init(
     app_context: *?*AppContext,
 ) !sdl3.AppResult {
-    const image_shader_bin = assets.get.file("/shaders/image.spv");
+    const shader_bin = assets.shaders.@"instanced_render.spv";
     const image_asset = assets.get.file("/sprites/conveyor.png");
 
     try sdl3.init(.{
         .gamepad = true,
     });
+    zmesh.init(allocator);
 
     const window = sdl3.video.Window.init("Pixel Perfect Painted Pipeline", SCREEN_WIDTH, SCREEN_HEIGHT, WINDOW_FLAGS) catch return .failure;
     errdefer window.deinit();
@@ -90,7 +62,7 @@ pub fn init(
     device.claimWindow(window) catch return .failure;
 
     const vert_shader = device.createShader(.{
-        .code = image_shader_bin,
+        .code = shader_bin,
         .format = SHADER_FORMATS,
         .stage = .vertex,
         .entry_point = "vertexmain",
@@ -102,7 +74,7 @@ pub fn init(
     defer device.releaseShader(vert_shader);
 
     const frag_shader = device.createShader(.{
-        .code = image_shader_bin,
+        .code = shader_bin,
         .format = SHADER_FORMATS,
         .stage = .fragment,
         .entry_point = "fragmentmain",
@@ -117,6 +89,20 @@ pub fn init(
     const image_surface = sdl3.image.loadIo(image_stream, true) catch return .failure;
     defer image_surface.deinit();
 
+    const mesh = zmesh.Shape.initPlane(1, 1);
+    const mesh_texcoords = mesh.texcoords orelse return .failure;
+    const vertex_data = allocator.alloc(Vertex, mesh.positions.len) catch return .failure;
+    const index_data = mesh.indices;
+    for (mesh.positions, mesh_texcoords, 0..) |positions, texcoords, i| {
+        vertex_data[i] = Vertex{
+            .positions = positions,
+            .texcoords = texcoords,
+        };
+    }
+
+    const vertex_data_size: u32 = @intCast(@sizeOf(Vertex) * vertex_data.len);
+    const index_data_size: u32 = @intCast(@sizeOf(u32) * index_data.len);
+
     const pipeline_create_info = sdl3.gpu.GraphicsPipelineCreateInfo{
         .target_info = .{
             .color_target_descriptions = &.{
@@ -124,7 +110,39 @@ pub fn init(
                     .format = device.getSwapchainTextureFormat(window),
                 },
             },
+            .depth_stencil_format = .depth16_unorm,
         },
+        .depth_stencil_state = .{
+            .enable_depth_test = true,
+            .enable_depth_write = true,
+            .enable_stencil_test = false,
+            .compare = .less,
+            .write_mask = 0xFF,
+        },
+        .vertex_input_state = .{
+            .vertex_buffer_descriptions = &.{.{
+                .slot = 0,
+                .pitch = @sizeOf(Vertex),
+                .input_rate = .vertex,
+                .instance_step_rate = 0,
+            }},
+            .vertex_attributes = &.{
+                .{
+                    .location = 0,
+                    .buffer_slot = 0,
+                    .format = .f32x3,
+                    .offset = 0,
+                },
+                .{
+                    .location = 1,
+                    .buffer_slot = 0,
+                    .format = .f32x2,
+                    .offset = @offsetOf(Vertex, "texcoords"),
+                },
+            },
+        },
+        .primitive_type = .triangle_list,
+        .rasterizer_state = .{ .fill_mode = .fill },
         .vertex_shader = vert_shader,
         .fragment_shader = frag_shader,
     };
@@ -133,12 +151,12 @@ pub fn init(
     errdefer device.releaseGraphicsPipeline(pipeline);
 
     const sampler = device.createSampler(.{
-        .min_filter = .nearest,
-        .mag_filter = .nearest,
-        .mipmap_mode = .nearest,
-        .address_mode_u = .clamp_to_edge,
-        .address_mode_v = .clamp_to_edge,
-        .address_mode_w = .clamp_to_edge,
+        .min_filter = .linear,
+        .mag_filter = .linear,
+        .mipmap_mode = .linear,
+        .address_mode_u = .repeat,
+        .address_mode_v = .repeat,
+        .address_mode_w = .repeat,
     }) catch return .failure;
 
     const atlas_texture = device.createTexture(.{
@@ -151,6 +169,19 @@ pub fn init(
         .props = .{ .name = "sprite atlas" },
     }) catch return .failure;
     errdefer device.releaseTexture(atlas_texture);
+
+    const depth_texture = device.createTexture(.{
+        .texture_type = .two_dimensional,
+        .format = .depth16_unorm,
+        .width = SCREEN_WIDTH,
+        .height = SCREEN_HEIGHT,
+        .layer_count_or_depth = 1,
+        .num_levels = 1,
+        .sample_count = .no_multisampling,
+        .usage = .{ .sampler = true, .depth_stencil_target = true },
+        .props = .{ .name = "sprite atlas" },
+    }) catch return .failure;
+    errdefer device.releaseTexture(depth_texture);
 
     const atlas_transfer_buffer = device.createTransferBuffer(.{
         .usage = .upload,
@@ -166,12 +197,30 @@ pub fn init(
 
     const instance_buffer = device.createBuffer(.{
         .usage = .{ .graphics_storage_read = true },
-        .size = sprite_data_size,
+        .size = INSTACE_BUFFER_SIZE,
     }) catch return .failure;
     const instance_transfer_buffer = device.createTransferBuffer(.{
         .usage = .upload,
-        .size = sprite_data_size,
+        .size = INSTACE_BUFFER_SIZE,
     }) catch return .failure;
+
+    const vertex_buffer = device.createBuffer(.{
+        .usage = .{ .vertex = true },
+        .size = vertex_data_size,
+    }) catch return .failure;
+    const index_buffer = device.createBuffer(.{
+        .usage = .{ .index = true },
+        .size = index_data_size,
+    }) catch return .failure;
+    const vertex_index_transfer_buffer = device.createTransferBuffer(.{
+        .usage = .upload,
+        .size = vertex_data_size + index_data_size,
+    }) catch return .failure;
+
+    const vertex_index_transfer_buffer_mapped = try device.mapTransferBuffer(vertex_index_transfer_buffer, false);
+    @memcpy(vertex_index_transfer_buffer_mapped, std.mem.sliceAsBytes(vertex_data));
+    @memcpy(vertex_index_transfer_buffer_mapped + vertex_data_size, std.mem.sliceAsBytes(index_data));
+    device.unmapTransferBuffer(vertex_index_transfer_buffer);
 
     const command_buffer = device.acquireCommandBuffer() catch return .failure;
     const copy_pass = command_buffer.beginCopyPass();
@@ -186,15 +235,27 @@ pub fn init(
     }, false);
     copy_pass.uploadToBuffer(
         .{
-            .transfer_buffer = instance_transfer_buffer,
+            .transfer_buffer = vertex_index_transfer_buffer,
             .offset = 0,
         },
         .{
-            .buffer = instance_buffer,
+            .buffer = vertex_buffer,
             .offset = 0,
-            .size = sprite_data_size,
+            .size = vertex_data_size,
         },
-        true,
+        false,
+    );
+    copy_pass.uploadToBuffer(
+        .{
+            .transfer_buffer = vertex_index_transfer_buffer,
+            .offset = vertex_data_size,
+        },
+        .{
+            .buffer = index_buffer,
+            .offset = 0,
+            .size = index_data_size,
+        },
+        false,
     );
     copy_pass.end();
     command_buffer.submit() catch return .failure;
@@ -204,11 +265,17 @@ pub fn init(
         .device = device,
         .window = window,
         .pipeline = pipeline,
+        .vertex_buffer = vertex_buffer,
+        .index_buffer = index_buffer,
+        .vertex_index_transfer_buffer = vertex_index_transfer_buffer,
         .instance_buffer = instance_buffer,
         .instance_transfer_buffer = instance_transfer_buffer,
         .atlas_texture = atlas_texture,
+        .depth_texture = depth_texture,
+        .mesh = mesh,
         .sampler = sampler,
         .previous_time = sdl3.timer.getMillisecondsSinceInit(),
+        .camera = .{ 0, 3, 10, 0 },
     };
     app_context.* = context;
 
@@ -223,26 +290,44 @@ pub fn iterate(app_context: *AppContext) !sdl3.AppResult {
     const delta_scale = MOVEMENT_SPEED * delta_time;
     const raw_vector = zm.Vec{
         app_context.input.movement_x,
+        0,
         app_context.input.movement_y,
         0,
-        0,
     };
-    const direction_vector = if (app_context.input.movement_x != 0 or app_context.input.movement_y != 0) zm.normalize2(raw_vector) else raw_vector;
+    const direction_vector = if (app_context.input.movement_x != 0 or app_context.input.movement_y != 0) zm.normalize3(raw_vector) else raw_vector;
     const movement_vector = direction_vector * zm.f32x4s(delta_scale);
     app_context.camera += movement_vector;
-    const movement_matrix = zm.translationV(app_context.camera);
-    const view_projection_matrix = zm.mul(movement_matrix, PROJECTION_MATRIX);
+    app_context.camera[1] = 10.0;
 
-    const instance_transfer_buffer_mapped = @as(
-        *@TypeOf(test_instances),
-        @alignCast(@ptrCast(
-            app_context.device.mapTransferBuffer(
-                app_context.instance_transfer_buffer,
-                true,
-            ) catch return .failure,
-        )),
-    );
-    instance_transfer_buffer_mapped.* = test_instances;
+    const cam_angle = std.math.degreesToRadians(45);
+    const cam_up = zm.Vec{ 0, 1, 0, 0 };
+    const cam_target = app_context.camera + zm.Vec{
+        0,
+        -std.math.sin(cam_angle),
+        -std.math.cos(cam_angle),
+        0,
+    };
+
+    const test_instances: [2]zm.Mat = .{
+        zm.identity(),
+        zm.translation(3, 4, 5),
+    };
+
+    const transforms = CameraData{
+        .view = zm.lookAtLh(app_context.camera, cam_target, cam_up),
+        .projection = zm.perspectiveFovLh(
+            std.math.degreesToRadians(45),
+            @as(f32, @floatFromInt(SCREEN_WIDTH)) / @as(f32, @floatFromInt(SCREEN_HEIGHT)),
+            0.1,
+            100,
+        ),
+    };
+
+    const instance_transfer_buffer_mapped = app_context.device.mapTransferBuffer(
+        app_context.instance_transfer_buffer,
+        true,
+    ) catch return .failure;
+    @memcpy(instance_transfer_buffer_mapped, std.mem.sliceAsBytes(&test_instances));
     app_context.device.unmapTransferBuffer(app_context.instance_transfer_buffer);
 
     const command_buffer = app_context.device.acquireCommandBuffer() catch return .failure;
@@ -256,7 +341,7 @@ pub fn iterate(app_context: *AppContext) !sdl3.AppResult {
         .{
             .buffer = app_context.instance_buffer,
             .offset = 0,
-            .size = sprite_data_size,
+            .size = @sizeOf(@TypeOf(test_instances)),
         },
         true,
     );
@@ -272,12 +357,32 @@ pub fn iterate(app_context: *AppContext) !sdl3.AppResult {
                 .load = .clear,
                 .store = .store,
             }},
-            null,
+            .{
+                .texture = app_context.depth_texture,
+                .clear_depth = 1,
+                .load = .clear,
+                .store = .store,
+                .stencil_load = .clear,
+                .stencil_store = .store,
+                .cycle = true,
+                .clear_stencil = 0,
+            },
         );
         defer render_pass.end();
 
         render_pass.bindGraphicsPipeline(app_context.pipeline);
 
+        render_pass.bindVertexBuffers(0, &.{.{
+            .buffer = app_context.vertex_buffer,
+            .offset = 0,
+        }});
+        render_pass.bindIndexBuffer(
+            .{
+                .buffer = app_context.index_buffer,
+                .offset = 0,
+            },
+            .indices_16bit,
+        );
         render_pass.bindVertexStorageBuffers(
             0,
             &.{app_context.instance_buffer},
@@ -290,9 +395,15 @@ pub fn iterate(app_context: *AppContext) !sdl3.AppResult {
             }},
         );
 
-        command_buffer.pushVertexUniformData(0, std.mem.sliceAsBytes(&view_projection_matrix));
+        command_buffer.pushVertexUniformData(0, std.mem.asBytes(&transforms));
 
-        render_pass.drawPrimitives(6 * test_instances.len, 1, 0, 0);
+        render_pass.drawIndexedPrimitives(
+            @intCast(app_context.mesh.indices.len),
+            test_instances.len,
+            0,
+            0,
+            0,
+        );
     }
 
     command_buffer.submit() catch return .failure;
@@ -363,13 +474,18 @@ pub fn quit(
 ) !void {
     _ = result;
     app_context.device.releaseWindow(app_context.window);
+    app_context.device.releaseBuffer(app_context.vertex_buffer);
+    app_context.device.releaseBuffer(app_context.index_buffer);
+    app_context.device.releaseTransferBuffer(app_context.vertex_index_transfer_buffer);
     app_context.device.releaseBuffer(app_context.instance_buffer);
     app_context.device.releaseTransferBuffer(app_context.instance_transfer_buffer);
     app_context.device.releaseGraphicsPipeline(app_context.pipeline);
     app_context.device.releaseSampler(app_context.sampler);
     app_context.device.releaseTexture(app_context.atlas_texture);
+    app_context.device.releaseTexture(app_context.depth_texture);
     app_context.window.deinit();
     app_context.device.deinit();
     if (app_context.gamepad) |gamepad| gamepad.deinit();
+    // zmesh.deinit();
     arena.deinit();
 }
