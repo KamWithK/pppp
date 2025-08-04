@@ -10,6 +10,7 @@ const allocator = arena.allocator();
 const GameContext = @import("state.zig").GameContext;
 const CameraData = @import("state.zig").CameraData;
 const Instance = @import("instance.zig");
+const Grid = @import("grid.zig");
 
 pub const SCREEN_WIDTH = 1920;
 pub const SCREEN_HEIGHT = 1080;
@@ -52,9 +53,10 @@ pub fn init(
         .device = device,
         .window = window,
         .previous_time = sdl3.timer.getMillisecondsSinceInit(),
-        .camera = .{ 0, 3, 10, 0 },
+        .camera = .{ 0, 15, 20, 0 },
     };
     context.instance_context = try Instance.init_pipeline(allocator, context.app_context);
+    context.grid_context = try Grid.init_pipeline(context.app_context);
     context.input_context = .{};
     game_context.* = context;
 
@@ -80,20 +82,22 @@ pub fn iterate(game_context: *GameContext) !sdl3.AppResult {
     const direction_vector = if (input_context.movement_x != 0 or input_context.movement_y != 0) zm.normalize3(raw_vector) else raw_vector;
     const movement_vector = direction_vector * zm.f32x4s(delta_scale);
     app_context.camera += movement_vector;
-    app_context.camera[1] = 10.0;
 
-    const cam_angle = std.math.degreesToRadians(45);
+    // const cam_angle = std.math.degreesToRadians(-45);
     const cam_up = zm.Vec{ 0, 1, 0, 0 };
     const cam_target = app_context.camera + zm.Vec{
         0,
-        -std.math.sin(cam_angle),
-        -std.math.cos(cam_angle),
+        -5,
+        -10,
         0,
     };
 
     const test_instances: []const zm.Mat = &.{
-        zm.identity(),
-        zm.translation(3, 4, 5),
+        zm.translation(10, 0, 10),
+        zm.translation(-10, 0, 10),
+        zm.translation(10, 0, -10),
+        zm.translation(-10, 0, -10),
+        zm.translation(0, 5, 0),
     };
 
     const camera_data = CameraData{
@@ -128,6 +132,12 @@ pub fn iterate(game_context: *GameContext) !sdl3.AppResult {
         );
         defer render_pass.end();
 
+        try Grid.iterate_pipeline(
+            game_context.grid_context,
+            camera_data,
+            command_buffer,
+            render_pass,
+        );
         try Instance.iterate_pipeline(
             game_context.instance_context,
             test_instances,
@@ -211,6 +221,7 @@ pub fn quit(
 
     if (app_context.gamepad) |gamepad| gamepad.deinit();
     try Instance.quit_pipeline(game_context);
+    try Grid.quit_pipeline(game_context);
 
     app_context.device.releaseWindow(app_context.window);
     app_context.window.deinit();

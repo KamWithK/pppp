@@ -6,6 +6,7 @@ pub const GameContext = struct {
     app_context: AppContext,
     instance_context: InstanceContext,
     input_context: InputContext,
+    grid_context: GridContext,
 };
 
 pub const InstanceContext = struct {
@@ -19,6 +20,10 @@ pub const InstanceContext = struct {
     instance_buffer: sdl3.gpu.Buffer,
     instance_transfer_buffer: sdl3.gpu.TransferBuffer,
     sampler: sdl3.gpu.Sampler,
+};
+
+pub const GridContext = struct {
+    pipeline: sdl3.gpu.GraphicsPipeline,
 };
 
 pub const AppContext = struct {
