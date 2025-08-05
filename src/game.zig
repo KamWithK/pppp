@@ -2,14 +2,18 @@ const std = @import("std");
 const sdl3 = @import("sdl3");
 const zm = @import("zmath");
 const zmesh = @import("zmesh");
-const assets = @import("assets");
 
-var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-const allocator = arena.allocator();
+var game_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+var frame_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+const game_allocator = game_arena.allocator();
+const frame_allocator = frame_arena.allocator();
 
 const GameContext = @import("state.zig").GameContext;
 const CameraData = @import("state.zig").CameraData;
+const InstanceData = @import("instance.zig").InstanceData;
 const Instance = @import("instance.zig");
+const Texture = @import("texture.zig");
+const Mesh = @import("mesh.zig");
 const Grid = @import("grid.zig");
 
 pub const SCREEN_WIDTH = 1920;
@@ -48,16 +52,37 @@ pub fn init(
 
     device.claimWindow(window) catch return .failure;
 
-    const context = allocator.create(GameContext) catch return .failure;
+    const context = game_allocator.create(GameContext) catch return .failure;
     context.app_context = .{
         .device = device,
         .window = window,
         .previous_time = sdl3.timer.getMillisecondsSinceInit(),
         .camera = .{ 0, 15, 20, 0 },
     };
-    context.instance_context = try Instance.init_pipeline(allocator, context.app_context);
+    context.instance_context = try Instance.init_pipeline(context.app_context);
     context.grid_context = try Grid.init_pipeline(context.app_context);
     context.input_context = .{};
+
+    context.texture_context = try Texture.create_texture_buffer(device);
+    context.mesh_context = try Mesh.create_meshes_buffers(game_allocator, device);
+
+    const command_buffer = try device.acquireCommandBuffer();
+    const copy_pass = command_buffer.beginCopyPass();
+
+    try Texture.upload_texture_release(
+        context.app_context,
+        context.texture_context,
+        copy_pass,
+    );
+    try Mesh.copy_vertex_index_buffers(
+        device,
+        copy_pass,
+        context.mesh_context,
+    );
+
+    copy_pass.end();
+    try command_buffer.submit();
+
     game_context.* = context;
 
     return .run;
@@ -65,6 +90,8 @@ pub fn init(
 
 pub fn iterate(game_context: *GameContext) !sdl3.AppResult {
     const current_time = sdl3.timer.getMillisecondsSinceInit();
+
+    _ = frame_arena.reset(.retain_capacity);
 
     const app_context = &game_context.app_context;
     const input_context = &game_context.input_context;
@@ -92,13 +119,22 @@ pub fn iterate(game_context: *GameContext) !sdl3.AppResult {
         0,
     };
 
-    const test_instances: []const zm.Mat = &.{
-        zm.translation(10, 0, 10),
-        zm.translation(-10, 0, 10),
-        zm.translation(10, 0, -10),
-        zm.translation(-10, 0, -10),
-        zm.translation(0, 5, 0),
-    };
+    var test_instances = std.StringArrayHashMap(InstanceData).init(frame_allocator);
+    try test_instances.put(
+        "cylinder",
+        &.{
+            zm.translation(10, 0, 10),
+            zm.translation(-10, 0, 10),
+            zm.translation(10, 0, -10),
+            zm.translation(-10, 0, -10),
+        },
+    );
+    try test_instances.put(
+        "cone",
+        &.{
+            zm.translation(0, 0, 0),
+        },
+    );
 
     const camera_data = CameraData{
         .view = zm.lookAtLh(app_context.camera, cam_target, cam_up),
@@ -110,12 +146,12 @@ pub fn iterate(game_context: *GameContext) !sdl3.AppResult {
         ),
     };
 
-    try Instance.map_transfer_buffer(game_context, test_instances);
+    try Instance.map_transfer_buffers(game_context, test_instances);
 
     const command_buffer = app_context.device.acquireCommandBuffer() catch return .failure;
 
     const copy_pass = command_buffer.beginCopyPass();
-    try Instance.copy_buffers(game_context.instance_context, test_instances, copy_pass);
+    try Instance.copy_buffers(game_context, test_instances, copy_pass);
     copy_pass.end();
 
     const swapchain_texture = command_buffer.waitAndAcquireSwapchainTexture(app_context.window) catch return .failure;
@@ -139,7 +175,7 @@ pub fn iterate(game_context: *GameContext) !sdl3.AppResult {
             render_pass,
         );
         try Instance.iterate_pipeline(
-            game_context.instance_context,
+            game_context.*,
             test_instances,
             camera_data,
             command_buffer,
@@ -220,6 +256,8 @@ pub fn quit(
     const app_context = &game_context.app_context;
 
     if (app_context.gamepad) |gamepad| gamepad.deinit();
+    try Texture.quit_pipeline(game_context);
+    try Mesh.quit_pipeline(game_context);
     try Instance.quit_pipeline(game_context);
     try Grid.quit_pipeline(game_context);
 
@@ -227,5 +265,6 @@ pub fn quit(
     app_context.window.deinit();
     app_context.device.deinit();
 
-    arena.deinit();
+    game_arena.deinit();
+    frame_arena.deinit();
 }

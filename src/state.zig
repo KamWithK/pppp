@@ -1,24 +1,29 @@
+const std = @import("std");
 const sdl3 = @import("sdl3");
 const zmesh = @import("zmesh");
 const zm = @import("zmath");
 
 pub const GameContext = struct {
     app_context: AppContext,
+    texture_context: TextureContext,
+    mesh_context: MeshContext,
     instance_context: InstanceContext,
     input_context: InputContext,
     grid_context: GridContext,
 };
 
+pub const TextureContext = struct {
+    texture: sdl3.gpu.Texture,
+    transfer_buffer: sdl3.gpu.TransferBuffer,
+    width: u32,
+    height: u32,
+};
+
+pub const MeshContext = std.StringArrayHashMap(MeshInfo);
+
 pub const InstanceContext = struct {
     pipeline: sdl3.gpu.GraphicsPipeline,
-    atlas_texture: sdl3.gpu.Texture,
     depth_texture: sdl3.gpu.Texture,
-    mesh: zmesh.Shape,
-    vertex_buffer: sdl3.gpu.Buffer,
-    index_buffer: sdl3.gpu.Buffer,
-    vertex_index_transfer_buffer: sdl3.gpu.TransferBuffer,
-    instance_buffer: sdl3.gpu.Buffer,
-    instance_transfer_buffer: sdl3.gpu.TransferBuffer,
     sampler: sdl3.gpu.Sampler,
 };
 
@@ -42,4 +47,22 @@ pub const InputContext = struct {
 pub const CameraData = struct {
     view: zm.Mat,
     projection: zm.Mat,
+};
+
+pub const Vertex = struct {
+    positions: [3]f32,
+    texcoords: [2]f32,
+};
+
+pub const MeshInfo = struct {
+    vertex_buffer: sdl3.gpu.Buffer,
+    index_buffer: sdl3.gpu.Buffer,
+    instance_buffer: sdl3.gpu.Buffer,
+
+    vertex_index_transfer_buffer: sdl3.gpu.TransferBuffer,
+    instance_transfer_buffer: sdl3.gpu.TransferBuffer,
+
+    vertex_data_size: u32,
+    index_data_size: u32,
+    index_count: u32,
 };
