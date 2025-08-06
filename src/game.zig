@@ -54,16 +54,17 @@ pub fn init(
 
     const context = game_allocator.create(GameContext) catch return .failure;
     context.app_context = .{
+        .exe_path = try std.fs.selfExeDirPathAlloc(game_allocator),
         .device = device,
         .window = window,
         .previous_time = sdl3.timer.getMillisecondsSinceInit(),
         .camera = .{ 0, 15, 20, 0 },
     };
-    context.instance_context = try Instance.init_pipeline(context.app_context);
-    context.grid_context = try Grid.init_pipeline(context.app_context);
+    context.instance_context = try Instance.init_pipeline(game_allocator, context.app_context);
+    context.grid_context = try Grid.init_pipeline(game_allocator, context.app_context);
     context.input_context = .{};
 
-    context.texture_context = try Texture.create_texture_buffer(device);
+    context.texture_context = try Texture.create_texture_buffer(game_allocator, context.app_context);
     context.mesh_context = try Mesh.create_meshes_buffers(game_allocator, device);
 
     const command_buffer = try device.acquireCommandBuffer();

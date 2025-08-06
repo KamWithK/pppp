@@ -32,11 +32,18 @@ pub const GridContext = struct {
 };
 
 pub const AppContext = struct {
+    exe_path: []const u8,
     device: sdl3.gpu.Device,
     window: sdl3.video.Window,
     gamepad: ?sdl3.gamepad.Gamepad = null,
     camera: zm.Vec = .{ 0, 0, 0, 0 },
     previous_time: u64,
+
+    pub fn pathToZ(self: *const AppContext, allocator: std.mem.Allocator, path: []const u8) ![:0]const u8 {
+        const joined_path = try std.fs.path.join(allocator, &.{ self.exe_path, path });
+
+        return allocator.dupeZ(u8, joined_path);
+    }
 };
 
 pub const InputContext = struct {

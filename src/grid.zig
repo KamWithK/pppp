@@ -1,7 +1,6 @@
 const std = @import("std");
 const sdl3 = @import("sdl3");
 const zm = @import("zmath");
-const assets = @import("assets");
 
 const GameContext = @import("state.zig").GameContext;
 const AppContext = @import("state.zig").AppContext;
@@ -17,10 +16,12 @@ const SCREEN_WIDTH = @import("game.zig").SCREEN_WIDTH;
 const SCREEN_HEIGHT = @import("game.zig").SCREEN_HEIGHT;
 const SHADER_FORMATS = @import("game.zig").SHADER_FORMATS;
 
-pub fn init_pipeline(app_context: AppContext) !GridContext {
+pub fn init_pipeline(allocator: std.mem.Allocator, app_context: AppContext) !GridContext {
     const device = app_context.device;
 
-    const shader_bin = assets.shaders.@"grid.spv";
+    const shader_bin = try sdl3.io_stream.loadFile(
+        try app_context.pathToZ(allocator, "assets/shaders/grid.spv"),
+    );
 
     const vert_shader = try device.createShader(.{
         .code = shader_bin,

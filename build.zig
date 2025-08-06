@@ -1,5 +1,4 @@
 const std = @import("std");
-const assetpack = @import("assetpack");
 
 // Although this function looks imperative, note that its job is to
 // declaratively construct a build graph that will be executed by an external
@@ -16,7 +15,11 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
-    const assets_module = assetpack.pack(b, b.path("assets"), .{});
+    b.installDirectory(.{
+        .source_dir = b.path("assets"),
+        .install_dir = .bin,
+        .install_subdir = "assets",
+    });
 
     // This creates a "module", which represents a collection of source files alongside
     // some compilation options, such as optimization mode and linked system libraries.
@@ -66,7 +69,6 @@ pub fn build(b: *std.Build) void {
         .root_module = lib_mod,
         .link_libc = true,
     });
-    lib.root_module.addImport("assets", assets_module);
     lib.root_module.addImport("sdl3", sdl3.module("sdl3"));
     lib.root_module.addImport("zmath", zmath.module("root"));
     lib.root_module.addImport("zmesh", zmesh.module("root"));

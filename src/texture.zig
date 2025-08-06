@@ -1,15 +1,16 @@
+const std = @import("std");
 const sdl3 = @import("sdl3");
-const assets = @import("assets");
 
 const GameContext = @import("state.zig").GameContext;
 const AppContext = @import("state.zig").AppContext;
 const TextureContext = @import("state.zig").TextureContext;
 
-pub fn create_texture_buffer(device: sdl3.gpu.Device) !TextureContext {
-    const image_asset = assets.sprites.@"conveyor.png";
+pub fn create_texture_buffer(allocator: std.mem.Allocator, app_context: AppContext) !TextureContext {
+    const device = app_context.device;
 
-    const image_stream = try sdl3.io_stream.Stream.initFromConstMem(image_asset);
-    const image_surface = try sdl3.image.loadIo(image_stream, true);
+    const image_surface = try sdl3.image.loadFile(
+        try app_context.pathToZ(allocator, "assets/sprites/conveyor.png"),
+    );
     defer image_surface.deinit();
 
     const texture = try device.createTexture(.{
