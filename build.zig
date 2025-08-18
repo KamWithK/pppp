@@ -1,6 +1,4 @@
 const std = @import("std");
-const assetpack = @import("assetpack");
-const atlas_pack = @import("src/atlas_pack.zig");
 
 // Although this function looks imperative, note that its job is to
 // declaratively construct a build graph that will be executed by an external
@@ -17,7 +15,11 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
-    const assets_module = assetpack.pack(b, b.path("assets"), .{});
+    b.installDirectory(.{
+        .source_dir = b.path("assets"),
+        .install_dir = .bin,
+        .install_subdir = "assets",
+    });
 
     const atlas_mod = b.createModule(.{
         .root_source_file = b.path("src/atlas_pack.zig"),
@@ -58,6 +60,7 @@ pub fn build(b: *std.Build) void {
         .c_sdl_preferred_linkage = .dynamic,
     });
     const zmath = b.dependency("zmath", .{});
+    const zmesh = b.dependency("zmesh", .{});
 
     // Modules can depend on one another using the `std.Build.Module.addImport` function.
     // This is what allows Zig source code to use `@import("foo")` where 'foo' is not a
@@ -93,7 +96,8 @@ pub fn build(b: *std.Build) void {
     });
     lib.root_module.addImport("sdl3", sdl3.module("sdl3"));
     lib.root_module.addImport("zmath", zmath.module("root"));
-    lib.root_module.addImport("assets", assets_module);
+    lib.root_module.addImport("zmesh", zmesh.module("root"));
+    lib.linkLibrary(zmesh.artifact("zmesh"));
 
     // This declares intent for the library to be installed into the standard
     // location when the user invokes the "install" step (the default step when
@@ -108,6 +112,8 @@ pub fn build(b: *std.Build) void {
     });
     exe.root_module.addImport("sdl3", sdl3.module("sdl3"));
     exe.root_module.addImport("zmath", zmath.module("root"));
+    exe.root_module.addImport("zmesh", zmesh.module("root"));
+    exe.linkLibrary(zmesh.artifact("zmesh"));
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default

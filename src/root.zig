@@ -1,7 +1,7 @@
 const std = @import("std");
 const sdl3 = @import("sdl3");
 
-const AppContext = @import("state.zig").AppContext;
+const GameContext = @import("state.zig").GameContext;
 const game = @import("game.zig");
 
 // Logging from: https://github.com/Gota7/zig-sdl3/blob/master/gpu_examples/src/main.zig.
@@ -55,29 +55,29 @@ fn sdlLog(
 }
 
 export fn init(
-    app_context: *?*AppContext,
+    game_context: *?*GameContext,
 ) sdl3.AppResult {
     sdl3.errors.error_callback = &sdlErr;
     sdl3.log.setAllPriorities(.info);
     sdl3.log.setLogOutputFunction(void, sdlLog, null);
 
-    return game.init(app_context) catch return .failure;
+    return game.init(game_context) catch return .failure;
 }
 
-export fn iterate(app_context: *AppContext) sdl3.AppResult {
-    return game.iterate(app_context) catch return .failure;
+export fn iterate(game_context: *GameContext) sdl3.AppResult {
+    return game.iterate(game_context) catch return .failure;
 }
 
 export fn event(
-    app_context: *AppContext,
+    game_context: *GameContext,
     curr_event: *const sdl3.events.Event,
 ) sdl3.AppResult {
-    return game.event(app_context, curr_event) catch return .failure;
+    return game.event(game_context, curr_event) catch return .failure;
 }
 
 export fn quit(
-    app_context: *AppContext,
+    game_context: *GameContext,
     result: sdl3.AppResult,
 ) void {
-    return game.quit(app_context, result) catch return .failure;
+    return game.quit(game_context, result) catch return .failure;
 }

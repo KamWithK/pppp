@@ -1,62 +1,28 @@
 const std = @import("std");
 const sdl3 = @import("sdl3");
 const zm = @import("zmath");
-const assets = @import("assets");
+const zmesh = @import("zmesh");
 
-var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-const allocator = arena.allocator();
+var game_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+var frame_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+const game_allocator = game_arena.allocator();
+const frame_allocator = frame_arena.allocator();
 
-const AppContext = @import("state.zig").AppContext;
+const GameContext = @import("state.zig").GameContext;
+const CameraData = @import("state.zig").CameraData;
+const InstanceData = @import("instance.zig").InstanceData;
+const Instance = @import("instance.zig");
+const Texture = @import("texture.zig");
+const Mesh = @import("mesh.zig");
+const Grid = @import("grid.zig");
 
-const SpriteInstance = struct {
-    position: [3]f32,
-    rotation: f32,
-    size: [2]f32,
-    padding: [2]f32,
-    uv: [2]f32,
-    tex: [2]f32,
-    rgba: [4]f32,
-};
-const test_instances = [_]SpriteInstance{
-    .{
-        .position = .{ 0, 0, 0 },
-        .rotation = 0,
-        .size = .{ 32, 32 },
-        .padding = .{ 0, 0 },
-        .uv = .{ 0, 0 },
-        .tex = .{ 1, 0.5 },
-        .rgba = .{ 1, 1, 1, 1 },
-    },
-    .{
-        .position = .{ 32, 32, 0 },
-        .rotation = 0,
-        .size = .{ 32, 32 },
-        .padding = .{ 0, 0 },
-        .uv = .{ 0, 0.5 },
-        .tex = .{ 1, 0.5 },
-        .rgba = .{ 1, 1, 1, 1 },
-    },
-};
-
-const sprite_instance_size = @sizeOf(SpriteInstance);
-const sprite_data_size = @sizeOf(@TypeOf(test_instances));
-
-const SCREEN_WIDTH = 1920;
-const SCREEN_HEIGHT = 1080;
-const MOVEMENT_SPEED = 0.5;
-const KEYBOARD_MOVEMENT_UNIT = 1;
-const DEBUG_MODE = true;
-const SHADER_FORMATS = sdl3.gpu.ShaderFormatFlags{ .spirv = true };
+pub const SCREEN_WIDTH = 1920;
+pub const SCREEN_HEIGHT = 1080;
+pub const SHADER_FORMATS = sdl3.gpu.ShaderFormatFlags{ .spirv = true };
 const WINDOW_FLAGS = sdl3.video.Window.Flags{ .resizable = true, .borderless = true };
-
-const PROJECTION_MATRIX = zm.orthographicOffCenterLh(
-    0,
-    SCREEN_WIDTH,
-    0,
-    SCREEN_HEIGHT,
-    0,
-    1,
-);
+const DEBUG_MODE = true;
+const MOVEMENT_SPEED = 0.005;
+const KEYBOARD_MOVEMENT_UNIT = 1;
 
 fn normalize_axis(raw: i16, deadzone: f32) f32 {
     const max: f32 = std.math.maxInt(i16);
@@ -72,11 +38,8 @@ fn normalize_axis(raw: i16, deadzone: f32) f32 {
 }
 
 pub fn init(
-    app_context: *?*AppContext,
+    game_context: *?*GameContext,
 ) !sdl3.AppResult {
-    const image_shader_bin = assets.get.file("/shaders/image.spv");
-    const image_asset = assets.get.file("/sprites/conveyor.png");
-
     try sdl3.init(.{
         .gamepad = true,
     });
@@ -89,177 +52,107 @@ pub fn init(
 
     device.claimWindow(window) catch return .failure;
 
-    const vert_shader = device.createShader(.{
-        .code = image_shader_bin,
-        .format = SHADER_FORMATS,
-        .stage = .vertex,
-        .entry_point = "vertexmain",
-        .num_samplers = 0,
-        .num_uniform_buffers = 1,
-        .num_storage_buffers = 1,
-        .num_storage_textures = 0,
-    }) catch return .failure;
-    defer device.releaseShader(vert_shader);
-
-    const frag_shader = device.createShader(.{
-        .code = image_shader_bin,
-        .format = SHADER_FORMATS,
-        .stage = .fragment,
-        .entry_point = "fragmentmain",
-        .num_samplers = 1,
-        .num_uniform_buffers = 0,
-        .num_storage_buffers = 0,
-        .num_storage_textures = 0,
-    }) catch return .failure;
-    defer device.releaseShader(frag_shader);
-
-    const image_stream = sdl3.io_stream.Stream.initFromConstMem(image_asset) catch return .failure;
-    const image_surface = sdl3.image.loadIo(image_stream, true) catch return .failure;
-    defer image_surface.deinit();
-
-    const pipeline_create_info = sdl3.gpu.GraphicsPipelineCreateInfo{
-        .target_info = .{
-            .color_target_descriptions = &.{
-                .{
-                    .format = device.getSwapchainTextureFormat(window),
-                },
-            },
-        },
-        .vertex_shader = vert_shader,
-        .fragment_shader = frag_shader,
-    };
-
-    const pipeline = device.createGraphicsPipeline(pipeline_create_info) catch return .failure;
-    errdefer device.releaseGraphicsPipeline(pipeline);
-
-    const sampler = device.createSampler(.{
-        .min_filter = .nearest,
-        .mag_filter = .nearest,
-        .mipmap_mode = .nearest,
-        .address_mode_u = .clamp_to_edge,
-        .address_mode_v = .clamp_to_edge,
-        .address_mode_w = .clamp_to_edge,
-    }) catch return .failure;
-
-    const atlas_texture = device.createTexture(.{
-        .format = .r8g8b8a8_unorm,
-        .width = @intCast(image_surface.getWidth()),
-        .height = @intCast(image_surface.getHeight()),
-        .layer_count_or_depth = 1,
-        .num_levels = 1,
-        .usage = .{ .sampler = true },
-        .props = .{ .name = "sprite atlas" },
-    }) catch return .failure;
-    errdefer device.releaseTexture(atlas_texture);
-
-    const atlas_transfer_buffer = device.createTransferBuffer(.{
-        .usage = .upload,
-        .size = @intCast(image_surface.getWidth() * image_surface.getHeight() * 4),
-    }) catch return .failure;
-    defer device.releaseTransferBuffer(atlas_transfer_buffer);
-    const atlas_pixels = image_surface.getPixels() orelse return .failure;
-    @memcpy(
-        device.mapTransferBuffer(atlas_transfer_buffer, false) catch return .failure,
-        atlas_pixels,
-    );
-    device.unmapTransferBuffer(atlas_transfer_buffer);
-
-    const instance_buffer = device.createBuffer(.{
-        .usage = .{ .graphics_storage_read = true },
-        .size = sprite_data_size,
-    }) catch return .failure;
-    const instance_transfer_buffer = device.createTransferBuffer(.{
-        .usage = .upload,
-        .size = sprite_data_size,
-    }) catch return .failure;
-
-    const command_buffer = device.acquireCommandBuffer() catch return .failure;
-    const copy_pass = command_buffer.beginCopyPass();
-    copy_pass.uploadToTexture(.{
-        .transfer_buffer = atlas_transfer_buffer,
-        .offset = 0,
-    }, .{
-        .texture = atlas_texture,
-        .width = @intCast(image_surface.getWidth()),
-        .height = @intCast(image_surface.getHeight()),
-        .depth = 1,
-    }, false);
-    copy_pass.uploadToBuffer(
-        .{
-            .transfer_buffer = instance_transfer_buffer,
-            .offset = 0,
-        },
-        .{
-            .buffer = instance_buffer,
-            .offset = 0,
-            .size = sprite_data_size,
-        },
-        true,
-    );
-    copy_pass.end();
-    command_buffer.submit() catch return .failure;
-
-    const context = allocator.create(AppContext) catch return .failure;
-    context.* = .{
+    const context = game_allocator.create(GameContext) catch return .failure;
+    context.app_context = .{
+        .exe_path = try std.fs.selfExeDirPathAlloc(game_allocator),
         .device = device,
         .window = window,
-        .pipeline = pipeline,
-        .instance_buffer = instance_buffer,
-        .instance_transfer_buffer = instance_transfer_buffer,
-        .atlas_texture = atlas_texture,
-        .sampler = sampler,
         .previous_time = sdl3.timer.getMillisecondsSinceInit(),
+        .camera = .{ 0, 15, 20, 0 },
     };
-    app_context.* = context;
+    context.instance_context = try Instance.init_pipeline(game_allocator, context.app_context);
+    context.grid_context = try Grid.init_pipeline(game_allocator, context.app_context);
+    context.input_context = .{};
+
+    context.texture_context = try Texture.create_texture_buffer(game_allocator, context.app_context);
+    context.mesh_context = try Mesh.create_meshes_buffers(game_allocator, device);
+
+    const command_buffer = try device.acquireCommandBuffer();
+    const copy_pass = command_buffer.beginCopyPass();
+
+    try Texture.upload_texture_release(
+        context.app_context,
+        context.texture_context,
+        copy_pass,
+    );
+    try Mesh.copy_vertex_index_buffers(
+        device,
+        copy_pass,
+        context.mesh_context,
+    );
+
+    copy_pass.end();
+    try command_buffer.submit();
+
+    game_context.* = context;
 
     return .run;
 }
 
-pub fn iterate(app_context: *AppContext) !sdl3.AppResult {
+pub fn iterate(game_context: *GameContext) !sdl3.AppResult {
     const current_time = sdl3.timer.getMillisecondsSinceInit();
+
+    _ = frame_arena.reset(.retain_capacity);
+
+    const app_context = &game_context.app_context;
+    const input_context = &game_context.input_context;
+
     const delta_time: f32 = @floatFromInt(current_time - app_context.previous_time);
     app_context.previous_time = current_time;
 
     const delta_scale = MOVEMENT_SPEED * delta_time;
     const raw_vector = zm.Vec{
-        app_context.input.movement_x,
-        app_context.input.movement_y,
+        input_context.movement_x,
         0,
+        input_context.movement_y,
         0,
     };
-    const direction_vector = if (app_context.input.movement_x != 0 or app_context.input.movement_y != 0) zm.normalize2(raw_vector) else raw_vector;
+    const direction_vector = if (input_context.movement_x != 0 or input_context.movement_y != 0) zm.normalize3(raw_vector) else raw_vector;
     const movement_vector = direction_vector * zm.f32x4s(delta_scale);
     app_context.camera += movement_vector;
-    const movement_matrix = zm.translationV(app_context.camera);
-    const view_projection_matrix = zm.mul(movement_matrix, PROJECTION_MATRIX);
 
-    const instance_transfer_buffer_mapped = @as(
-        *@TypeOf(test_instances),
-        @alignCast(@ptrCast(
-            app_context.device.mapTransferBuffer(
-                app_context.instance_transfer_buffer,
-                true,
-            ) catch return .failure,
-        )),
+    // const cam_angle = std.math.degreesToRadians(-45);
+    const cam_up = zm.Vec{ 0, 1, 0, 0 };
+    const cam_target = app_context.camera + zm.Vec{
+        0,
+        -5,
+        -10,
+        0,
+    };
+
+    var test_instances = std.StringArrayHashMap(InstanceData).init(frame_allocator);
+    try test_instances.put(
+        "cylinder",
+        &.{
+            zm.translation(10, 0, 10),
+            zm.translation(-10, 0, 10),
+            zm.translation(10, 0, -10),
+            zm.translation(-10, 0, -10),
+        },
     );
-    instance_transfer_buffer_mapped.* = test_instances;
-    app_context.device.unmapTransferBuffer(app_context.instance_transfer_buffer);
+    try test_instances.put(
+        "cone",
+        &.{
+            zm.translation(0, 0, 0),
+        },
+    );
+
+    const camera_data = CameraData{
+        .view = zm.lookAtLh(app_context.camera, cam_target, cam_up),
+        .projection = zm.perspectiveFovLh(
+            std.math.degreesToRadians(45),
+            @as(f32, @floatFromInt(SCREEN_WIDTH)) / @as(f32, @floatFromInt(SCREEN_HEIGHT)),
+            0.1,
+            100,
+        ),
+    };
+
+    try Instance.map_transfer_buffers(game_context, test_instances);
 
     const command_buffer = app_context.device.acquireCommandBuffer() catch return .failure;
 
     const copy_pass = command_buffer.beginCopyPass();
-    copy_pass.uploadToBuffer(
-        .{
-            .transfer_buffer = app_context.instance_transfer_buffer,
-            .offset = 0,
-        },
-        .{
-            .buffer = app_context.instance_buffer,
-            .offset = 0,
-            .size = sprite_data_size,
-        },
-        true,
-    );
+    try Instance.copy_buffers(game_context, test_instances, copy_pass);
     copy_pass.end();
 
     const swapchain_texture = command_buffer.waitAndAcquireSwapchainTexture(app_context.window) catch return .failure;
@@ -272,27 +165,23 @@ pub fn iterate(app_context: *AppContext) !sdl3.AppResult {
                 .load = .clear,
                 .store = .store,
             }},
-            null,
+            Instance.depth_stencil(game_context.instance_context),
         );
         defer render_pass.end();
 
-        render_pass.bindGraphicsPipeline(app_context.pipeline);
-
-        render_pass.bindVertexStorageBuffers(
-            0,
-            &.{app_context.instance_buffer},
+        try Grid.iterate_pipeline(
+            game_context.grid_context,
+            camera_data,
+            command_buffer,
+            render_pass,
         );
-        render_pass.bindFragmentSamplers(
-            0,
-            &.{.{
-                .texture = app_context.atlas_texture,
-                .sampler = app_context.sampler,
-            }},
+        try Instance.iterate_pipeline(
+            game_context.*,
+            test_instances,
+            camera_data,
+            command_buffer,
+            render_pass,
         );
-
-        command_buffer.pushVertexUniformData(0, std.mem.sliceAsBytes(&view_projection_matrix));
-
-        render_pass.drawPrimitives(6 * test_instances.len, 1, 0, 0);
     }
 
     command_buffer.submit() catch return .failure;
@@ -301,37 +190,40 @@ pub fn iterate(app_context: *AppContext) !sdl3.AppResult {
 }
 
 pub fn event(
-    app_context: *AppContext,
+    game_context: *GameContext,
     curr_event: *const sdl3.events.Event,
 ) !sdl3.AppResult {
+    var app_context = &game_context.app_context;
+    var input_context = &game_context.input_context;
+
     switch (curr_event.*) {
         .quit => return .success,
         .terminating => return .success,
         .key_down => {
             const key = curr_event.key_down.key orelse return .run;
             switch (key) {
-                .up => app_context.input.movement_y = -KEYBOARD_MOVEMENT_UNIT,
-                .left => app_context.input.movement_x = -KEYBOARD_MOVEMENT_UNIT,
-                .down => app_context.input.movement_y = KEYBOARD_MOVEMENT_UNIT,
-                .right => app_context.input.movement_x = KEYBOARD_MOVEMENT_UNIT,
-                .w => app_context.input.movement_y = -KEYBOARD_MOVEMENT_UNIT,
-                .a => app_context.input.movement_x = -KEYBOARD_MOVEMENT_UNIT,
-                .s => app_context.input.movement_y = KEYBOARD_MOVEMENT_UNIT,
-                .d => app_context.input.movement_x = KEYBOARD_MOVEMENT_UNIT,
+                .up => input_context.movement_y = -KEYBOARD_MOVEMENT_UNIT,
+                .left => input_context.movement_x = -KEYBOARD_MOVEMENT_UNIT,
+                .down => input_context.movement_y = KEYBOARD_MOVEMENT_UNIT,
+                .right => input_context.movement_x = KEYBOARD_MOVEMENT_UNIT,
+                .w => input_context.movement_y = -KEYBOARD_MOVEMENT_UNIT,
+                .a => input_context.movement_x = -KEYBOARD_MOVEMENT_UNIT,
+                .s => input_context.movement_y = KEYBOARD_MOVEMENT_UNIT,
+                .d => input_context.movement_x = KEYBOARD_MOVEMENT_UNIT,
                 else => {},
             }
         },
         .key_up => {
             const key = curr_event.key_up.key orelse return .run;
             switch (key) {
-                .up => app_context.input.movement_y = 0,
-                .left => app_context.input.movement_x = 0,
-                .down => app_context.input.movement_y = 0,
-                .right => app_context.input.movement_x = 0,
-                .w => app_context.input.movement_y = 0,
-                .a => app_context.input.movement_x = 0,
-                .s => app_context.input.movement_y = 0,
-                .d => app_context.input.movement_x = 0,
+                .up => input_context.movement_y = 0,
+                .left => input_context.movement_x = 0,
+                .down => input_context.movement_y = 0,
+                .right => input_context.movement_x = 0,
+                .w => input_context.movement_y = 0,
+                .a => input_context.movement_x = 0,
+                .s => input_context.movement_y = 0,
+                .d => input_context.movement_x = 0,
                 else => {},
             }
         },
@@ -346,8 +238,8 @@ pub fn event(
             const axis_motion = curr_event.gamepad_axis_motion;
 
             switch (axis_motion.axis) {
-                .left_x => app_context.input.movement_x = normalize_axis(axis_motion.value, 0.1),
-                .left_y => app_context.input.movement_y = normalize_axis(axis_motion.value, 0.1),
+                .left_x => input_context.movement_x = normalize_axis(axis_motion.value, 0.1),
+                .left_y => input_context.movement_y = normalize_axis(axis_motion.value, 0.1),
                 else => {},
             }
         },
@@ -358,18 +250,22 @@ pub fn event(
 }
 
 pub fn quit(
-    app_context: *AppContext,
+    game_context: *GameContext,
     result: sdl3.AppResult,
 ) !void {
     _ = result;
+    const app_context = &game_context.app_context;
+
+    if (app_context.gamepad) |gamepad| gamepad.deinit();
+    try Texture.quit_pipeline(game_context);
+    try Mesh.quit_pipeline(game_context);
+    try Instance.quit_pipeline(game_context);
+    try Grid.quit_pipeline(game_context);
+
     app_context.device.releaseWindow(app_context.window);
-    app_context.device.releaseBuffer(app_context.instance_buffer);
-    app_context.device.releaseTransferBuffer(app_context.instance_transfer_buffer);
-    app_context.device.releaseGraphicsPipeline(app_context.pipeline);
-    app_context.device.releaseSampler(app_context.sampler);
-    app_context.device.releaseTexture(app_context.atlas_texture);
     app_context.window.deinit();
     app_context.device.deinit();
-    if (app_context.gamepad) |gamepad| gamepad.deinit();
-    arena.deinit();
+
+    game_arena.deinit();
+    frame_arena.deinit();
 }

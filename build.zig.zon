@@ -40,13 +40,13 @@
             .url = "git+https://github.com/Gota7/zig-sdl3?ref=master#2d11d7a368871c64e7b95ef8f3d3a37a83dd2738",
             .hash = "sdl3-0.0.1-NmT1Q_naIABvvZqajxpOI6ZhIMyAuRjf6CBO5Rpj356w",
         },
-        .assetpack = .{
-            .url = "git+https://github.com/silversquirl/assetpack#17c6e5e1af3c7a9d9025232b30378405f8681e60",
-            .hash = "assetpack-0.1.0-5DA2dxhAAACUESRirVFQSYMT6XfF8zT9cfKQQfCUvBAe",
-        },
         .zmath = .{
             .url = "git+https://github.com/zig-gamedev/zmath.git#05799b336d4eb315cd5a5e5693a5704ba01db36c",
             .hash = "zmath-0.11.0-dev-wjwivdErAwA9JvOksjectxgnDUZumDR1V9DwKy5UeTOT",
+        },
+        .zmesh = .{
+            .url = "git+https://github.com/zig-gamedev/zmesh.git#06ca952e4a5ed5f6ac6aafa18c0a60433fda7a03",
+            .hash = "zmesh-0.11.0-dev-oO3A5jF7CgBzPlsy4p-tZeDsINxp3_CwNpGYx7OQcRlE",
         },
     },
     .paths = .{
