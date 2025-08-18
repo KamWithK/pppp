@@ -1,9 +1,8 @@
 .direnv
-.zig-cache/
-zig-out/
-/release/
-/debug/
-/build/
-/build-*/
-/docgen_tmp/
-*.o
+/build
+.DS_Store
+
+/*.exe
+/pppp
+/*.pdb
+/*.dSYM

@@ -1,0 +1,88 @@
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct type_Local
+{
+    float min_x;
+    float max_x;
+    float min_z;
+    float max_z;
+    uint vertices_x;
+    uint vertices_z;
+};
+
+struct Vertex
+{
+    float3 Position;
+    float4 Color;
+    float2 Texcoord;
+    float3 Normal;
+};
+
+struct type_RWStructuredBuffer_Vertex
+{
+    Vertex _m0[1];
+};
+
+struct type_RWStructuredBuffer_uint
+{
+    uint _m0[1];
+};
+
+kernel void main0(constant type_Local& Local [[buffer(0)]], device type_RWStructuredBuffer_Vertex& VertexBuffer [[buffer(1)]], device type_RWStructuredBuffer_uint& IndexBuffer [[buffer(2)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    do
+    {
+        bool _62;
+        if (!(gl_GlobalInvocationID.x >= Local.vertices_x))
+        {
+            _62 = gl_GlobalInvocationID.z >= Local.vertices_z;
+        }
+        else
+        {
+            _62 = true;
+        }
+        if (_62)
+        {
+            break;
+        }
+        int _67 = int((gl_GlobalInvocationID.z * Local.vertices_x) + gl_GlobalInvocationID.x);
+        uint _78 = Local.vertices_x - 1u;
+        float _79 = float(_78);
+        uint _83 = Local.vertices_z - 1u;
+        float _84 = float(_83);
+        float _86 = float(gl_GlobalInvocationID.x);
+        float _89 = float(gl_GlobalInvocationID.z);
+        uint _95 = uint(_67);
+        VertexBuffer._m0[_95].Position = float3(Local.min_x + (_86 * ((Local.max_x - Local.min_x) / _79)), 0.0, Local.min_z + (_89 * ((Local.max_z - Local.min_z) / _84)));
+        VertexBuffer._m0[_95].Color = float4(0.0, 0.0, 1.0, 1.0);
+        VertexBuffer._m0[_95].Texcoord = float2(_86 / _79, _89 / _84);
+        VertexBuffer._m0[_95].Normal = float3(0.0, 1.0, 0.0);
+        bool _106;
+        if (!(gl_GlobalInvocationID.x >= _78))
+        {
+            _106 = gl_GlobalInvocationID.z >= _83;
+        }
+        else
+        {
+            _106 = true;
+        }
+        if (_106)
+        {
+            break;
+        }
+        int _111 = int(_95 + Local.vertices_x);
+        int _116 = int(6u * ((gl_GlobalInvocationID.z * _78) + gl_GlobalInvocationID.x));
+        IndexBuffer._m0[uint(_116)] = uint(_111);
+        IndexBuffer._m0[uint(_116 + 1)] = _95;
+        uint _123 = uint(_111 + 1);
+        IndexBuffer._m0[uint(_116 + 2)] = _123;
+        IndexBuffer._m0[uint(_116 + 3)] = _123;
+        IndexBuffer._m0[uint(_116 + 4)] = _95;
+        IndexBuffer._m0[uint(_116 + 5)] = uint(_67 + 1);
+        break;
+    } while(false);
+}
+
