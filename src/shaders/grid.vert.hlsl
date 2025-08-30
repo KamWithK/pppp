@@ -19,8 +19,8 @@ Output main(uint id: SV_VertexID) {
   Output output;
 
   output.position = float4(ndcCorners[id], 0, 1);
-  output.nearPoint = UnprojectPoint(float3(output.position.xy, 0));
-  output.farPoint = UnprojectPoint(float3(output.position.xy, 1));
+  output.nearPoint = UnprojectPoint(float3(output.position.xy, 1));
+  output.farPoint = UnprojectPoint(float3(output.position.xy, 0.00001));
 
   return output;
 }

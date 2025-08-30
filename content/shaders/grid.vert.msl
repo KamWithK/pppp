@@ -51,7 +51,7 @@ struct type_Global
     float4x4 invProjectionMat;
 };
 
-constant spvUnsafeArray<float2, 4> _36 = spvUnsafeArray<float2, 4>({ float2(-1.0), float2(1.0, -1.0), float2(-1.0, 1.0), float2(1.0) });
+constant spvUnsafeArray<float2, 4> _37 = spvUnsafeArray<float2, 4>({ float2(-1.0), float2(1.0, -1.0), float2(-1.0, 1.0), float2(1.0) });
 
 struct main0_out
 {
@@ -63,12 +63,11 @@ struct main0_out
 vertex main0_out main0(constant type_Global& Global [[buffer(0)]], uint gl_VertexIndex [[vertex_id]])
 {
     main0_out out = {};
-    float4 _43 = float4(_36[gl_VertexIndex], 0.0, 1.0);
-    float4 _49 = Global.invViewMat * (Global.invProjectionMat * _43);
-    float4 _56 = Global.invViewMat * (Global.invProjectionMat * float4(_36[gl_VertexIndex], 1.0, 1.0));
-    out.gl_Position = _43;
-    out.out_var_TEXCOORD0 = _49.xyz / float3(_49.w);
-    out.out_var_TEXCOORD1 = _56.xyz / float3(_56.w);
+    float4 _51 = Global.invViewMat * (Global.invProjectionMat * float4(_37[gl_VertexIndex], 1.0, 1.0));
+    float4 _58 = Global.invViewMat * (Global.invProjectionMat * float4(_37[gl_VertexIndex], 9.9999997473787516355514526367188e-06, 1.0));
+    out.gl_Position = float4(_37[gl_VertexIndex], 0.0, 1.0);
+    out.out_var_TEXCOORD0 = _51.xyz / float3(_51.w);
+    out.out_var_TEXCOORD1 = _58.xyz / float3(_58.w);
     return out;
 }
 

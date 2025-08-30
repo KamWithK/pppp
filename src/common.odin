@@ -2,6 +2,7 @@ package main
 
 import "base:runtime"
 import "core:log"
+import "core:math"
 import "core:math/linalg"
 import "core:math/linalg/hlsl"
 import sdl "vendor:sdl3"
@@ -37,6 +38,19 @@ intersect_plane :: proc(
 		hlsl.dot(plane_position - ray_origin, plane_normal) *
 		hlsl.rcp(hlsl.dot(plane_normal, ray_direction))
 	return t * ray_direction + ray_origin
+}
+
+reverse_perspective := proc(fovy, aspect, near: f32) -> (m: Mat4) {
+	tan_half_fovy := math.tan(0.5 * fovy)
+	m[0, 0] = 1 / (aspect * tan_half_fovy)
+	m[1, 1] = 1 / (tan_half_fovy)
+	m[3, 2] = +1
+
+	m[2, 3] = near
+
+	m[2] = -m[2]
+
+	return
 }
 
 Globals :: struct {

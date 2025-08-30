@@ -127,7 +127,8 @@ game_init :: proc() {
 				rotation = linalg.quaternion_from_euler_angle_y_f32(15 * linalg.RAD_PER_DEG),
 			},
 			{model_id = 3, position = {0, 0, 0}},
-			{model_id = 4, position = {0, 0, 0}},
+			{model_id = 2, position = {10, 0, 0}},
+			{model_id = 1, position = {11, 0, 0}},
 		},
 	)
 
@@ -204,12 +205,7 @@ game_render :: proc(
 	swapchain_tex: ^sdl.GPUTexture,
 	model_entities: Model_Entities,
 ) {
-	proj_mat := linalg.matrix4_perspective(
-		FOVY,
-		f32(g.window_size.x) / f32(g.window_size.y),
-		0.0001,
-		1000,
-	)
+	proj_mat := reverse_perspective(FOVY, f32(g.window_size.x) / f32(g.window_size.y), 0.1)
 	view_mat := linalg.matrix4_look_at_f32(g.camera.position, g.camera.target, {0, 1, 0})
 	inv_proj := linalg.inverse(proj_mat)
 	inv_view := linalg.inverse(view_mat)
@@ -241,7 +237,7 @@ game_render :: proc(
 	depth_target_info := sdl.GPUDepthStencilTargetInfo {
 		texture     = g.depth_texture,
 		load_op     = .CLEAR,
-		clear_depth = 1,
+		clear_depth = 0,
 		store_op    = .DONT_CARE,
 	}
 	render_pass := sdl.BeginGPURenderPass(cmd_buf, &color_target, 1, &depth_target_info)
@@ -354,7 +350,7 @@ setup_pipeline :: proc() {
 			depth_stencil_state = {
 				enable_depth_test = true,
 				enable_depth_write = true,
-				compare_op = .LESS,
+				compare_op = .GREATER,
 			},
 			rasterizer_state = {cull_mode = .BACK},
 			target_info = {
@@ -382,11 +378,7 @@ setup_skybox_pipeline :: proc() {
 			vertex_shader = vert_shader,
 			fragment_shader = frag_shader,
 			primitive_type = .TRIANGLELIST,
-			depth_stencil_state = {
-				enable_depth_test = true,
-				enable_depth_write = false,
-				compare_op = .EQUAL,
-			},
+			depth_stencil_state = {enable_depth_test = true, compare_op = .GREATER},
 			rasterizer_state = {cull_mode = .BACK},
 			target_info = {
 				num_color_targets = 1,
@@ -429,7 +421,7 @@ setup_light_shape_pipeline :: proc() {
 			depth_stencil_state = {
 				enable_depth_test = true,
 				enable_depth_write = true,
-				compare_op = .LESS,
+				compare_op = .GREATER,
 			},
 			rasterizer_state = {cull_mode = .BACK},
 			target_info = {
@@ -460,7 +452,7 @@ setup_grid_pipeline :: proc() {
 			depth_stencil_state = {
 				enable_depth_test = true,
 				enable_depth_write = true,
-				compare_op = .LESS_OR_EQUAL,
+				compare_op = .GREATER,
 			},
 			rasterizer_state = {fill_mode = .FILL},
 			target_info = {
